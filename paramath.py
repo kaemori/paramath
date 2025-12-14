@@ -1,4 +1,3 @@
-import sympy
 import json
 from typing import List, Dict, Tuple, Optional, Union, Any
 from dataclasses import dataclass, field
@@ -10,7 +9,7 @@ import re
 setflags = (
     lambda logfile, verbose, debug: (logfile << 2) | (verbose << 1) | (debug << 0)
 )
-flags = 0b111
+flags = 0b000
 
 VERBOSE = bool(flags & (1 << 0))
 DEBUG = bool(flags & (1 << 1))
@@ -688,6 +687,7 @@ def simplify_ast(
     aliases: Dict[str, str],
     line_num: int,
     var_names: List[str] = None,
+    do_simplify: bool = True,
 ) -> Any:
     if var_names is None:
         var_names = list("abcdefxym") + ["ans", "pi", "e"]
@@ -716,7 +716,14 @@ def simplify_ast(
 
     if isinstance(ast, list) and len(ast) == 1:
         return simplify_ast(
-            ast[0], epsilon, constants, functions, aliases, line_num, var_names
+            ast[0],
+            epsilon,
+            constants,
+            functions,
+            aliases,
+            line_num,
+            var_names,
+            do_simplify,
         )
 
     if not isinstance(ast, list) or len(ast) == 0:
@@ -754,6 +761,7 @@ def simplify_ast(
             aliases,
             line_num,
             var_names,
+            do_simplify,
         )
 
     if isinstance(ast[0], str) and ast[0].lower() == "lambda":
@@ -765,7 +773,7 @@ def simplify_ast(
     op = ast[0]
     if isinstance(op, list):
         op = simplify_ast(
-            op, epsilon, constants, functions, aliases, line_num, var_names
+            op, epsilon, constants, functions, aliases, line_num, var_names, do_simplify
         )
 
     if isinstance(op, str):
@@ -788,43 +796,54 @@ def simplify_ast(
                 aliases,
                 line_num,
                 var_names,
+                do_simplify,
             )
 
         if op_lower in BASIC_OPS:
             simplified_operands = [
                 simplify_ast(
-                    node, epsilon, constants, functions, aliases, line_num, var_names
+                    node,
+                    epsilon,
+                    constants,
+                    functions,
+                    aliases,
+                    line_num,
+                    var_names,
+                    do_simplify,
                 )
                 for node in ast[1:]
             ]
 
-            identity_result = apply_identity_simplifications(
-                op_lower, simplified_operands
-            )
-            if identity_result is not None:
-                return simplify_ast(
-                    identity_result,
-                    epsilon,
-                    constants,
-                    functions,
-                    aliases,
-                    line_num,
-                    var_names,
+            if do_simplify:
+                identity_result = apply_identity_simplifications(
+                    op_lower, simplified_operands
                 )
+                if identity_result is not None:
+                    return simplify_ast(
+                        identity_result,
+                        epsilon,
+                        constants,
+                        functions,
+                        aliases,
+                        line_num,
+                        var_names,
+                        do_simplify,
+                    )
 
-            structural_result = apply_structural_simplifications(
-                op_lower, simplified_operands
-            )
-            if structural_result is not None:
-                return simplify_ast(
-                    structural_result,
-                    epsilon,
-                    constants,
-                    functions,
-                    aliases,
-                    line_num,
-                    var_names,
+                structural_result = apply_structural_simplifications(
+                    op_lower, simplified_operands
                 )
+                if structural_result is not None:
+                    return simplify_ast(
+                        structural_result,
+                        epsilon,
+                        constants,
+                        functions,
+                        aliases,
+                        line_num,
+                        var_names,
+                        do_simplify,
+                    )
 
             if op_lower in ["+", "*"] and len(simplified_operands) > 2:
                 result = simplified_operands[-1]
@@ -839,7 +858,14 @@ def simplify_ast(
             operands = ast[1:]
             simplified_operands = [
                 simplify_ast(
-                    node, epsilon, constants, functions, aliases, line_num, var_names
+                    node,
+                    epsilon,
+                    constants,
+                    functions,
+                    aliases,
+                    line_num,
+                    var_names,
+                    do_simplify,
                 )
                 for node in operands
             ]
@@ -872,11 +898,19 @@ def simplify_ast(
                     aliases,
                     line_num,
                     var_names,
+                    do_simplify,
                 )
             )
 
             return simplify_ast(
-                expanded, epsilon, constants, functions, aliases, line_num, var_names
+                expanded,
+                epsilon,
+                constants,
+                functions,
+                aliases,
+                line_num,
+                var_names,
+                do_simplify,
             )
 
         raise ParserError(f"unknown operation '{op_lower}'", line_num)
@@ -1344,9 +1378,10 @@ def find_beneficial_duplicates(
         if v["count"] > 1:
             dupe_length = expr_length(v["obj"], -1)
             if dupe_length >= min_length:
-                savings = (v["count"] - 1) * dupe_length - (dupe_length + 3)
+                total_size = v["count"] * dupe_length
+                savings = total_size - (dupe_length + 3 + (v["count"] - 1) * 3)
                 if savings > min_savings:
-                    beneficial_dupes.append((savings, dupe_length, v["obj"]))
+                    beneficial_dupes.append((savings, total_size, v["obj"]))
 
     beneficial_dupes.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return beneficial_dupes
@@ -1354,24 +1389,21 @@ def find_beneficial_duplicates(
 
 def extract_subexpressions(
     ast: Any, initial_length: int, min_savings: int = -999
-) -> List[Tuple[Any, Optional[Any]]]:
-    subexpressions = []
+) -> List[Tuple[Any, Optional[str]]]:
     current_ast = ast
 
-    while True:
-        beneficial_dupes = find_beneficial_duplicates(
-            current_ast, min_savings=min_savings
-        )
+    beneficial_dupes = find_beneficial_duplicates(current_ast, min_savings=min_savings)
 
-        if not beneficial_dupes:
-            break
+    if not beneficial_dupes:
+        return [(current_ast, None)]
 
-        largest_dupe = beneficial_dupes[0][2]
-        subexpressions.append((largest_dupe, None))
-        current_ast = replace_in_ast(current_ast, largest_dupe, "ans")
+    largest_dupe = beneficial_dupes[0][2]
+    replaced_ast = replace_in_ast(current_ast, largest_dupe, "ans")
 
-    subexpressions.append((current_ast, None))
-    return subexpressions
+    debug_print(
+        f"extracted single best duplicate with savings: {beneficial_dupes[0][0]}"
+    )
+    return [(largest_dupe, "ans"), (replaced_ast, None)]
 
 
 def preprocess_globals_and_aliases(code: List[str], config: ProgramConfig):
@@ -1487,6 +1519,7 @@ def compile_instructions(
                 config.aliases,
                 inst.line_start,
                 config.var_names,
+                inst.simplify,
             )
             initial_length = expr_length(simplified_ast, -1)
 
@@ -1498,7 +1531,7 @@ def compile_instructions(
                 else [(simplified_ast, None)]
             )
 
-            for index, (expr_ast, _) in enumerate(subexpressions):
+            for index, (expr_ast, var_name) in enumerate(subexpressions):
                 if inst.simplify:
                     expr_ast = try_simplify(expr_ast, inst)[0]
 
@@ -1532,8 +1565,8 @@ def compile_instructions(
                 if inst.sympy:
                     expr = simplify_with_sympy(expr, inst.line_start)
 
-                if index < len(subexpressions) - 1:
-                    output_mode = ("store", "ans")
+                if var_name == "ans":
+                    output_mode = ("store", "ans", "dupe")
                 else:
                     output_mode = inst.output
 
@@ -1581,6 +1614,9 @@ def main():
 
         with open("math.txt", "w") as f:
             for result, output in results:
+                result = (
+                    result.replace("**", "^").replace("*", "").replace("ans", "ANS")
+                )
                 print(f"to {output}:")
                 print(result)
                 f.write(f"to {output}:\n{result}\n")
