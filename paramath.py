@@ -3,17 +3,12 @@ from typing import List, Dict, Tuple, Optional, Union, Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from copy import deepcopy
+import argparse
+import sys
 import re
+import builtins
+import math
 
-
-setflags = (
-    lambda logfile, verbose, debug: (logfile << 2) | (verbose << 1) | (debug << 0)
-)
-flags = 0b000
-
-VERBOSE = bool(flags & (1 << 0))
-DEBUG = bool(flags & (1 << 1))
-LOGFILE = bool(flags & (1 << 2))
 
 VAR_NAMES = list("abcdefxym") + ["ans", "pi", "e"]
 BUILTIN_FUNCS = ["abs", "sin", "cos", "tan", "arcsin", "arccos", "arctan"]
@@ -59,12 +54,19 @@ OPERATION_EXPANSIONS = {
         ["*", then_val, cond],
         ["*", else_val, ["-", 1, cond]],
     ],
-    "mod": lambda a, b: [
+    "mod": lambda a, b, eps: [
         "-",
         ["/", b, 2],
         [
             "/",
-            ["*", b, ["arctan", ["/", 1, ["tan", ["*", ["*", "pi", a], ["/", 1, b]]]]]],
+            [
+                "*",
+                b,
+                [
+                    "arctan",
+                    ["/", 1, ["+", ["tan", ["*", ["*", "pi", a], ["/", 1, b]]], eps]],
+                ],
+            ],
             "pi",
         ],
     ],
@@ -138,7 +140,7 @@ def verbose_print(message: str):
 
 class ParsePhase(Enum):
     config = auto()
-    constants = auto()
+    code_globals = auto()
     functions = auto()
     output = auto()
     code = auto()
@@ -164,7 +166,7 @@ class LoopContext:
 
 @dataclass
 class ProgramConfig:
-    constants: Dict[str, float] = field(default_factory=dict)
+    code_globals: Dict[str, float] = field(default_factory=dict)
     functions: Dict[str, Function] = field(default_factory=dict)
     aliases: Dict[str, str] = field(default_factory=dict)
     precision: Optional[int] = 10
@@ -285,7 +287,7 @@ def check_naming_conflicts(
 ):
     name_lower = name.lower()
     conflicts = [
-        (name in config.constants, "global constant"),
+        (name in config.code_globals, "global"),
         (name_lower in config.aliases, "alias"),
         (name_lower in config.functions, "function name"),
     ]
@@ -319,7 +321,7 @@ def substitute_params(ast: Any, params: List[str], args: List[Any]) -> Any:
 
 def compile_value(
     expr_str: str,
-    constants: Dict[str, float],
+    code_globals: Dict[str, float],
     line_num: int,
     config: ProgramConfig,
     loop_vars: Optional[Dict[str, Any]] = None,
@@ -334,19 +336,45 @@ def compile_value(
     except ValueError:
         pass
 
-    try:
-        loop_vars = loop_vars or {}
-        import builtins
+    eval_globals = dict(code_globals)
+    eval_globals["epsilon"] = config.epsilon
+    loop_vars = loop_vars or {}
+    math_funcs = {
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "asin": math.asin,
+        "acos": math.acos,
+        "atan": math.atan,
+        "arcsin": math.asin,
+        "arccos": math.acos,
+        "arctan": math.atan,
+        "abs": abs,
+        "pi": math.pi,
+        "e": math.e,
+    }
 
-        eval_namespace = {
-            "__builtins__": builtins.__dict__,
-            "consts": type("Consts", (), constants)(),
-            "local": type("Local", (), loop_vars)(),
-            **constants,
-        }
-        result = num(eval(expr_str, eval_namespace))
+    globals_obj = type("Globals", (), eval_globals)()
+    local_obj = type("Local", (), loop_vars)()
+    math_obj = type("Math", (), math_funcs)()
+
+    eval_namespace = {
+        "__builtins__": builtins.__dict__,
+        "globals": globals_obj,
+        "local": local_obj,
+        "math": math_obj,
+    }
+
+    try:
+        print("    " + expr_str)
+        eval_result = eval(expr_str, eval_namespace)
+        result = num(eval_result)
         debug_print(f"eval'd to: {result}")
         return result
+    except (ValueError, TypeError) as e:
+        debug_print(
+            f"eval succeeded but couldn't convert to number: {e}, trying ast parse"
+        )
     except Exception as e:
         debug_print(f"eval failed: {e}, trying ast parse")
 
@@ -354,20 +382,31 @@ def compile_value(
         tokens = tokenize(expr_str)
         if not tokens:
             raise ParserError("empty expression", line_num)
+
         if tokens[0] != "(":
             if len(tokens) > 1:
                 tokens = ["("] + tokens + [")"]
+
         ast = parse_tokens(tokens, line_num)
         simplified = simplify_ast(
             ast,
             config.current_epsilon,
-            constants,
+            code_globals,
             config.functions,
             config.aliases,
             line_num,
         )
+
         expr = generate_expression(simplified, line_num)
-        result = num(eval(expr))
+
+        eval_namespace = {
+            "__builtins__": builtins.__dict__,
+            "globals": type("Globals", (), eval_globals)(),
+            "local": type("Local", (), loop_vars)(),
+            **eval_globals,
+            **math_funcs,
+        }
+        result = num(eval(expr, eval_namespace))
         debug_print(f"ast parse succeeded: {result}")
         return result
     except Exception as e:
@@ -682,7 +721,7 @@ def apply_structural_simplifications(op: str, operands: List[Any]) -> Optional[A
 def simplify_ast(
     ast: Any,
     epsilon: str,
-    constants: Dict[str, float],
+    code_globals: Dict[str, float],
     functions: Dict[str, Function],
     aliases: Dict[str, str],
     line_num: int,
@@ -699,15 +738,15 @@ def simplify_ast(
         ast_lower = ast.lower()
         if ast_lower in aliases:
             actual_var = aliases[ast_lower]
-            if actual_var in constants:
-                return constants[actual_var]
+            if actual_var in code_globals:
+                return code_globals[actual_var]
             if actual_var.lower() in var_names:
                 return actual_var.lower()
             raise ParserError(
                 f"alias '{ast}' points to unknown variable '{actual_var}'", line_num
             )
-        if ast in constants:
-            return constants[ast]
+        if ast in code_globals:
+            return code_globals[ast]
         if ast_lower in var_names:
             return ast_lower
         if ast == "ε" or ast_lower == "epsilon":
@@ -718,7 +757,7 @@ def simplify_ast(
         return simplify_ast(
             ast[0],
             epsilon,
-            constants,
+            code_globals,
             functions,
             aliases,
             line_num,
@@ -756,7 +795,7 @@ def simplify_ast(
         return simplify_ast(
             substituted_body,
             epsilon,
-            constants,
+            code_globals,
             functions,
             aliases,
             line_num,
@@ -773,7 +812,14 @@ def simplify_ast(
     op = ast[0]
     if isinstance(op, list):
         op = simplify_ast(
-            op, epsilon, constants, functions, aliases, line_num, var_names, do_simplify
+            op,
+            epsilon,
+            code_globals,
+            functions,
+            aliases,
+            line_num,
+            var_names,
+            do_simplify,
         )
 
     if isinstance(op, str):
@@ -791,7 +837,7 @@ def simplify_ast(
             return simplify_ast(
                 substituted_body,
                 epsilon,
-                constants,
+                code_globals,
                 functions,
                 aliases,
                 line_num,
@@ -804,7 +850,7 @@ def simplify_ast(
                 simplify_ast(
                     node,
                     epsilon,
-                    constants,
+                    code_globals,
                     functions,
                     aliases,
                     line_num,
@@ -822,7 +868,7 @@ def simplify_ast(
                     return simplify_ast(
                         identity_result,
                         epsilon,
-                        constants,
+                        code_globals,
                         functions,
                         aliases,
                         line_num,
@@ -837,7 +883,7 @@ def simplify_ast(
                     return simplify_ast(
                         structural_result,
                         epsilon,
-                        constants,
+                        code_globals,
                         functions,
                         aliases,
                         line_num,
@@ -860,7 +906,7 @@ def simplify_ast(
                 simplify_ast(
                     node,
                     epsilon,
-                    constants,
+                    code_globals,
                     functions,
                     aliases,
                     line_num,
@@ -874,11 +920,11 @@ def simplify_ast(
                 expanded = expansion(simplified_operands[0])
             elif op_lower in ["=0", "sign"]:
                 expanded = expansion(simplified_operands[0], epsilon)
-            elif op_lower in ["==", ">", ">=", "<", "<="]:
+            elif op_lower in ["==", ">", ">=", "<", "<=", "mod"]:
                 expanded = expansion(
                     simplified_operands[0], simplified_operands[1], epsilon
                 )
-            elif op_lower in ["max", "min", "mod"]:
+            elif op_lower in ["max", "min"]:
                 expanded = expansion(simplified_operands[0], simplified_operands[1])
             elif op_lower == "if":
                 expanded = expansion(
@@ -889,23 +935,10 @@ def simplify_ast(
             else:
                 raise ParserError(f"unknown expansion for '{op_lower}'", line_num)
 
-            print(
-                simplify_ast(
-                    expanded,
-                    epsilon,
-                    constants,
-                    functions,
-                    aliases,
-                    line_num,
-                    var_names,
-                    do_simplify,
-                )
-            )
-
             return simplify_ast(
                 expanded,
                 epsilon,
-                constants,
+                code_globals,
                 functions,
                 aliases,
                 line_num,
@@ -1176,8 +1209,8 @@ def parse_pragma(
             raise ParserError("global requires name and value", line_num)
         const_name = parts[0]
         const_value_str = parts[1]
-        config.constants[const_name] = compile_value(
-            const_value_str, config.constants, line_num, config
+        config.code_globals[const_name] = compile_value(
+            const_value_str, config.code_globals, line_num, config
         )
 
     elif pragma == "display":
@@ -1204,7 +1237,7 @@ def parse_pragma(
         var_name = parts[1].split()[0] if len(parts) >= 2 else None
         try:
             range_val = int(
-                compile_value(range_expr, config.constants, line_num, config)
+                compile_value(range_expr, config.code_globals, line_num, config)
             )
             if range_val < 0:
                 raise ParserError(
@@ -1295,7 +1328,7 @@ def unwrap_loop(
 
     try:
         range_val = int(
-            compile_value(range_expr, config.constants, first_line_num, config)
+            compile_value(range_expr, config.code_globals, first_line_num, config)
         )
     except Exception as e:
         raise ParserError(f"failed to evaluate repeat range: {e}", first_line_num)
@@ -1323,30 +1356,46 @@ def unwrap_loop(
 
     for iteration in range(range_val):
         debug_print(f"processing iteration {iteration}/{range_val}")
-        iteration_constants = dict(config.constants)
-        loop_vars = {}
+        iteration_code_globals = dict(config.code_globals)
 
         if iter_var:
-            iteration_constants[iter_var] = iteration
-            loop_vars[iter_var] = iteration
+            iteration_code_globals[iter_var] = iteration
+
+        local_substitutions = {}
+        if iter_var:
+            local_substitutions[iter_var] = str(iteration)
 
         for local_name, local_expr, def_line_num in local_defs:
+            current_expr = local_expr
+            for sub_name, sub_val in local_substitutions.items():
+                current_expr = re.sub(
+                    r"\b" + re.escape(sub_name) + r"\b", str(sub_val), current_expr
+                )
+
             try:
-                iteration_constants[local_name] = compile_value(
-                    local_expr, iteration_constants, def_line_num, config, loop_vars
+                evaluated_val = compile_value(
+                    current_expr, iteration_code_globals, def_line_num, config, {}
                 )
-                loop_vars[local_name] = iteration_constants[local_name]
+                iteration_code_globals[local_name] = evaluated_val
+                local_substitutions[local_name] = str(evaluated_val)
+                debug_print(
+                    f"successfully evaluated local {local_name} = {evaluated_val}"
+                )
             except Exception as e:
-                raise ParserError(
-                    f"failed to evaluate local '{local_name}': {e}", def_line_num
-                )
+                local_substitutions[local_name] = f"({current_expr})"
+                debug_print(f"keeping local {local_name} as template: {current_expr}")
 
         for line_num, line in non_local_lines:
             new_line = line
-            for const_name, const_val in iteration_constants.items():
+            for sub_name, sub_val in local_substitutions.items():
                 new_line = re.sub(
-                    r"\b" + re.escape(const_name) + r"\b", str(const_val), new_line
+                    r"\b" + re.escape(sub_name) + r"\b", str(sub_val), new_line
                 )
+            for const_name, const_val in iteration_code_globals.items():
+                if const_name not in local_substitutions:
+                    new_line = re.sub(
+                        r"\b" + re.escape(const_name) + r"\b", str(const_val), new_line
+                    )
 
             unwrapped.append((line_num, new_line))
 
@@ -1412,41 +1461,137 @@ def preprocess_globals_and_aliases(code: List[str], config: ProgramConfig):
     for i, line in enumerate(code):
         line = line.split("#")[0].strip()
         if line and line.lower().startswith("//variables"):
-            parse_pragma(line, config, i + 1, ParsePhase.constants)
+            parse_pragma(line, config, i + 1, ParsePhase.code_globals)
 
     for i, line in enumerate(code):
         line = line.split("#")[0].strip()
         if line and (
             line.lower().startswith("//global") or line.lower().startswith("//alias")
         ):
-            parse_pragma(line, config, i + 1, ParsePhase.constants)
+            parse_pragma(line, config, i + 1, ParsePhase.code_globals)
 
-    debug_print(f"found {len(config.constants)} globals, {len(config.aliases)} aliases")
+    debug_print(
+        f"found {len(config.code_globals)} globals, {len(config.aliases)} aliases"
+    )
 
 
 def expand_loops(code: List[str], config: ProgramConfig) -> List[Tuple[int, str]]:
     verbose_print("expanding loops")
 
-    expanded_code = []
-    i = 0
+    def expand_with_context(
+        lines: List[str],
+        loop_context: Dict[str, str],
+    ) -> List[Tuple[int, str]]:
+        expanded_code = []
+        i = 0
 
-    while i < len(code):
-        line = code[i].split("#")[0].strip()
-        if not line:
-            i += 1
-            continue
+        while i < len(lines):
+            line = lines[i].split("#")[0].strip()
+            if not line:
+                i += 1
+                continue
 
-        if line.lower().startswith("//repeat"):
-            loop_lines, lines_consumed = collect_loop_body(code, i)
-            unwrapped = unwrap_loop(loop_lines, config, i + 1)
-            expanded_code.extend(unwrapped)
-            i += lines_consumed
-        else:
-            expanded_code.append((i + 1, line))
-            i += 1
+            if line.lower().startswith("//repeat"):
+                loop_lines, lines_consumed = collect_loop_body(lines, i)
 
-    verbose_print(f"expanded to {len(expanded_code)} lines")
-    return expanded_code
+                first_line = loop_lines[0][1]
+                parts = first_line.split(None, 3)
+                if len(parts) < 2:
+                    raise ParserError("repeat requires range value", loop_lines[0][0])
+
+                range_expr = parts[1]
+                iter_var = parts[2] if len(parts) >= 3 else None
+
+                for var_name, var_val in loop_context.items():
+                    range_expr = re.sub(
+                        r"\b" + re.escape(var_name) + r"\b", str(var_val), range_expr
+                    )
+
+                try:
+                    range_val = int(
+                        compile_value(
+                            range_expr, config.code_globals, loop_lines[0][0], config
+                        )
+                    )
+                except Exception as e:
+                    raise ParserError(
+                        f"failed to evaluate repeat range: {e}", loop_lines[0][0]
+                    )
+
+                verbose_print(f"unwrapping loop: {range_val} iterations")
+
+                body_lines = loop_lines[1:-1]
+                local_defs = []
+                non_local_lines = []
+
+                for line_num, body_line in body_lines:
+                    if body_line.lower().startswith("//local"):
+                        rest = (
+                            body_line.split(None, 1)[1]
+                            if len(body_line.split(None, 1)) > 1
+                            else ""
+                        )
+                        local_parts = rest.split(None, 1)
+                        if len(local_parts) < 2:
+                            raise ParserError("local requires name and value", line_num)
+                        local_name = local_parts[0]
+                        local_expr = local_parts[1]
+                        local_defs.append((local_name, local_expr, line_num))
+                    else:
+                        non_local_lines.append((line_num, body_line))
+
+                for iteration in range(range_val):
+                    iter_context = dict(loop_context)
+                    if iter_var:
+                        iter_context[iter_var] = str(iteration)
+
+                    iter_code_globals = dict(config.code_globals)
+                    if iter_var:
+                        iter_code_globals[iter_var] = iteration
+
+                    for local_name, local_expr, def_line_num in local_defs:
+                        current_expr = local_expr
+                        for var_name, var_val in iter_context.items():
+                            current_expr = re.sub(
+                                r"\b" + re.escape(var_name) + r"\b",
+                                str(var_val),
+                                current_expr,
+                            )
+
+                        try:
+                            evaluated_val = compile_value(
+                                current_expr,
+                                iter_code_globals,
+                                def_line_num,
+                                config,
+                                {},
+                            )
+                            iter_code_globals[local_name] = evaluated_val
+                            iter_context[local_name] = str(evaluated_val)
+                        except:
+                            iter_context[local_name] = f"({current_expr})"
+
+                    body_as_list = [line for _, line in non_local_lines]
+                    nested_expanded = expand_with_context(body_as_list, iter_context)
+                    expanded_code.extend(nested_expanded)
+
+                i += lines_consumed
+            else:
+                processed_line = line
+                for var_name, var_val in loop_context.items():
+                    processed_line = re.sub(
+                        r"\b" + re.escape(var_name) + r"\b",
+                        str(var_val),
+                        processed_line,
+                    )
+                expanded_code.append((i + 1, processed_line))
+                i += 1
+
+        return expanded_code
+
+    result = expand_with_context(code, {})
+    verbose_print(f"expanded to {len(result)} lines")
+    return result
 
 
 def process_instructions(
@@ -1514,7 +1659,7 @@ def compile_instructions(
             simplified_ast = simplify_ast(
                 inst.ast,
                 "ε",
-                config.constants,
+                config.code_globals,
                 config.functions,
                 config.aliases,
                 inst.line_start,
@@ -1563,7 +1708,11 @@ def compile_instructions(
                 expr = expr.replace("ε", epsilon_str)
 
                 if inst.sympy:
-                    expr = simplify_with_sympy(expr, inst.line_start)
+                    expr = (
+                        simplify_with_sympy(expr, inst.line_start)
+                        .replace("Abs", "abs")
+                        .replace(".0e", "e")
+                    )
 
                 if var_name == "ans":
                     output_mode = ("store", "ans", "dupe")
@@ -1595,24 +1744,68 @@ def parse_program(code: List[str]) -> List[Tuple[str, Tuple[str, Optional[str]]]
 
 
 def main():
-    import sys
+    parser = argparse.ArgumentParser(
+        description="Paramath Compiler",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  python paramath.py testfile.pm
+  python paramath.py testfile.pm -D -V
+  python paramath.py testfile.pm -L output.log
+  python paramath.py testfile.pm -DVL debug.log
+        """,
+    )
+
+    parser.add_argument(
+        "filepath",
+        nargs="?",
+        help="Input paramath file",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="math.txt",
+        metavar="FILE",
+        help="output file (default: math.txt)",
+    )
+    parser.add_argument(
+        "-D", "--debug", action="store_true", help="enable debug output"
+    )
+    parser.add_argument(
+        "-V", "--verbose", action="store_true", help="enable verbose output"
+    )
+    parser.add_argument("-L", "--logfile", metavar="FILE", help="write logs to FILE")
+
+    args = parser.parse_args()
+
+    global VERBOSE, DEBUG, LOGFILE
+    VERBOSE = args.verbose
+    DEBUG = args.debug
+    LOGFILE = args.logfile
 
     if LOGFILE:
-        with open("logfile.txt", "w") as f:
-            f.seek(0)
-
-    filepath = sys.argv[1] if len(sys.argv) >= 2 else "testfile.pm"
+        with open(LOGFILE, "w") as f:
+            f.write("")
 
     try:
-        print(f"=== Paramath Compiler v2.0.0 ===")
-        print(f"reading: {filepath}\n")
+        print(f"=== paramath compiler v2.2.1 ===")
+        if args.filepath is None:
+            raise ParserError("No path to file provided, quitting")
+        print(f"reading: {args.filepath}")
+        if DEBUG:
+            print("[debug mode enabled]")
+        if VERBOSE:
+            print("[verbose mode enabled]")
+        if LOGFILE:
+            print(f"[logging to: {LOGFILE}]")
+        print()
 
-        with open(filepath) as f:
+        with open(args.filepath) as f:
             code = f.read().strip().replace(";", "\n").split("\n")
 
         results = parse_program(code)
 
-        with open("math.txt", "w") as f:
+        with open(args.output, "w") as f:
             for result, output in results:
                 result = (
                     result.replace("**", "^").replace("*", "").replace("ans", "ANS")
@@ -1623,9 +1816,10 @@ def main():
 
         print(f"\n=== compilation successful! ===")
         print(f"generated {len(results)} expressions")
+        print(f"written to: {args.output}")
 
     except FileNotFoundError:
-        print(f"error: file '{filepath}' not found")
+        print(f"error: file '{args.filepath}' not found")
         sys.exit(1)
     except ParserError as e:
         print(f"parser error: {e}")
@@ -1639,4 +1833,8 @@ def main():
 
 
 if __name__ == "__main__":
+    VERBOSE = False
+    DEBUG = False
+    LOGFILE = None
+
     main()

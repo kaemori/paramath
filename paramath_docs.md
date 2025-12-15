@@ -208,12 +208,12 @@ Example:
 A Paramath program consists of:
 
 1. **Configuration** (optional): Precision, epsilon, optimization settings
-2. **Constants** (optional): Named constant definitions
+2. **Globals** (optional): Named constant definitions
 3. **Aliases** (optional): Alternative variable names
 4. **Functions** (optional): User-defined functions
 5. **Code blocks**: Computation blocks with output directives
 
-> **Note:** Unlike v0.4, configurations and constants can appear anywhere! They only affect code that comes after them.
+> **Note:** Globals were named Constants before v0.4. Unlike Constants in v0.4, configurations and globals can appear anywhere! They only affect code that comes after them.
 
 ### Minimal Program
 
@@ -270,6 +270,8 @@ Sets decimal precision for constant evaluation:
 //precision 10
 //global PI_HIGH pi  # Evaluates to 10 decimals
 ```
+
+> **Note:** `pi` is calculated using python's math module, which provides up to 15 accurate significant decimals, and reaches 17 decimal places. If a higher precision is needed, creating a custom `//global PI_ACCURATE` would be the most elegant solution.
 
 #### `//epsilon`
 
@@ -405,7 +407,7 @@ Anonymous functions for one-time use.
 -   Parameters must start with `$`
 -   Body is a single expression (no `//ret` needed!)
 
-> **Note:** I mainly added this feature as a joke and a tribute to lisp. This literally has no practical use cases whatever, but feel free to use it!
+> **Note:** I mainly added this feature as a joke and a tribute to lisp. This has no practical use cases whatever, but feel free to use it!
 
 ---
 
@@ -419,7 +421,7 @@ Anonymous functions for one-time use.
 //endrepeat
 ```
 
-> **Note:** Loops are **unrolled at compile time** - the loop body is literally copied `count` times with substitutions.
+> **Note:** Loops are **unrolled at compile time** - the loop body is copied `count` times with substitutions.
 
 ### Simple Loop
 
@@ -435,7 +437,7 @@ Anonymous functions for one-time use.
 
 This generates 3 separate expressions, each computing `(+ x 1)`.
 
-> **Note:** Indentations are not necessary, and honestly with how simple this feature is, not using indentation won't kill you! The code strips each line of trailing whitespaces anyways.
+> **Note:** Indentations are not necessary, but they help with readability.
 
 ### Loops with Iterator Variable
 
