@@ -1784,6 +1784,12 @@ examples:
     parser.add_argument(
         "-V", "--verbose", action="store_true", help="enable verbose output"
     )
+    parser.add_argument(
+        "-O",
+        "--print-output",
+        action="store_true",
+        help="print out the compiled output",
+    )
     parser.add_argument("-L", "--logfile", metavar="FILE", help="write logs to FILE")
     args = parser.parse_args()
 
@@ -1791,6 +1797,7 @@ examples:
     VERBOSE = args.verbose
     DEBUG = args.debug
     LOGFILE = args.logfile
+    PRINT_OUTPUT = args.print_output
 
     if LOGFILE:
         with open(LOGFILE, "w") as f:
@@ -1806,7 +1813,8 @@ examples:
             print("[verbose mode enabled]")
         if LOGFILE:
             print(f"[logging to: {LOGFILE}]")
-        print()
+        if PRINT_OUTPUT:
+            print()
 
         with open(args.filepath) as f:
             code = f.read().strip().replace(";", "\n").split("\n")
@@ -1818,11 +1826,14 @@ examples:
                 result = (
                     result.replace("**", "^").replace("*", "").replace("ans", "ANS")
                 )
-                print(f"to {output}:")
-                print(result)
+                if PRINT_OUTPUT:
+                    print(f"to {output}:")
+                    print(result)
                 f.write(f"to {output}:\n{result}\n")
 
-        print(f"\n=== compilation successful! ===")
+        if PRINT_OUTPUT:
+            print("")
+        print(f"=== compilation successful! ===")
         print(f"generated {len(results)} expressions")
         print(f"written to: {args.output}")
 
