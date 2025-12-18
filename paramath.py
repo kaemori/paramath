@@ -10,7 +10,7 @@ import builtins
 import math
 
 
-PROGRAM_VERSION = "2.2.1"
+PROGRAM_VERSION = "2.2.2"
 
 
 VAR_NAMES = list("abcdefxym") + ["ans", "pi", "e"]
@@ -109,11 +109,9 @@ def cached(cache_name: str):
             cache = _caches[cache_name]
             key = json.dumps([args, kwargs], sort_keys=True, default=str)
             if key in cache:
-                debug_print(f"cache hit for {func.__name__}")
                 return cache[key]
             result = func(*args, **kwargs)
             cache[key] = result
-            debug_print(f"cache miss for {func.__name__}, storing result")
             return result
 
         return wrapper
@@ -127,8 +125,8 @@ def _log_message(prefix: str, message: str, max_len: int = 120):
     log_line = f"{prefix} {original_len}] {truncated}"
     print(log_line)
     if LOGFILE:
-        with open("logfile.txt", "a") as f:
-            f.write(log_line + "\n")
+        with open(LOGFILE, "a") as f:
+            f.write(f"{prefix} {original_len}] {message}\n")
 
 
 def debug_print(message: str):
@@ -234,12 +232,13 @@ class ParserError(Exception):
 
 
 def num(val):
-    for caster in (int, float):
-        try:
-            return caster(val)
-        except ValueError:
-            pass
-    raise ValueError(f"cannot turn {val!r} into a number")
+    try:
+        if float(val).is_integer():
+            return int(val)
+        else:
+            return float(val)
+    except ValueError:
+        raise ValueError(f"cannot turn {val!r} into a number")
 
 
 def tokenize(code: str) -> List[str]:
@@ -360,7 +359,6 @@ def compile_value(
 
     globals_obj = type("Globals", (), eval_globals)()
     locals_obj = type("Local", (), loop_vars)()
-    print(loop_vars)
 
     eval_namespace = {
         "__builtins__": builtins.__dict__,
@@ -371,10 +369,11 @@ def compile_value(
 
     possible_result = None
     try:
-        print("    " + expr_str)
         eval_result = eval(expr_str, eval_namespace)
-        print("    " + str(eval_result))
-        result = num(eval_result)
+        print(num(eval_result))
+        result = round(num(eval_result), config.precision)
+        print(result)
+        print(config.precision)
         debug_print(f"eval'd to: {result}")
         if safe_eval:
             possible_result = result
@@ -409,7 +408,6 @@ def compile_value(
                 raise ParserError(f"undefined variable '{var_name}'", line_num)
         raise ParserError(f"name error: {e}", line_num)
     except (ValueError, SyntaxError) as e:
-        print(e)
         if isinstance(e, SyntaxError):
             if "local." in expr_str:
                 raise ParserError(
@@ -1545,6 +1543,13 @@ def preprocess_globals_and_aliases(code: List[str], config: ProgramConfig):
 
     for i, line in enumerate(code):
         line = line.split("#")[0].strip()
+        if line and line.lower().startswith("//precision"):
+            parse_pragma(line, config, i + 1, ParsePhase.code_globals)
+        elif line and line.lower().startswith("//epsilon"):
+            parse_pragma(line, config, i + 1, ParsePhase.code_globals)
+
+    for i, line in enumerate(code):
+        line = line.split("#")[0].strip()
         if line and line.lower().startswith("//variables"):
             parse_pragma(line, config, i + 1, ParsePhase.code_globals)
 
@@ -1912,7 +1917,9 @@ examples:
         action="store_true",
         help="prints and blocks python code from evaluating and exits, used for safely running unknown scripts",
     )
-    parser.add_argument("-L", "--logfile", metavar="FILE", help="write logs to FILE")
+    parser.add_argument(
+        "-L", "--logfile", required=False, metavar="FILE", help="write logs to FILE"
+    )
     args = parser.parse_args()
 
     global VERBOSE, DEBUG, LOGFILE
@@ -1924,14 +1931,14 @@ examples:
 
     if LOGFILE:
         with open(LOGFILE, "w") as f:
-            f.write(f"Paramath Compiler {PROGRAM_VERSION}")
+            f.write(f"Paramath Compiler {PROGRAM_VERSION}\n")
 
     try:
         if args.filepath is None:
             raise ParserError("No path to file provided, quitting")
         print(f"reading {args.filepath}")
         if SAFE_EVAL:
-            print("[safe evaluation enabled")
+            print("[safe evaluation enabled]")
         if DEBUG:
             print("[debug mode enabled]")
         if VERBOSE:
