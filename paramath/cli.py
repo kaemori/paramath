@@ -226,7 +226,7 @@ class ParserError(Exception):
         self.line_num = line_num
 
 
-def num(val: int | float):
+def num(val: Union[str, int, float]) -> Union[int, float]:
     try:
         if float(val).is_integer():
             return int(val)
