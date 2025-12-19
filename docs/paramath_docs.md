@@ -365,7 +365,7 @@ Valid variable names: `a`, `b`, `c`, `d`, `e`, `f`, `x`, `y`, `m`
 
 -   Function names are case-insensitive
 -   Parameters must start with `$`
--   Body starts with `//ret` (return directive)
+-   Body must end with with `//ret` (return directive)
 
 ### Examples
 
@@ -449,7 +449,7 @@ Anonymous functions for one-time use.
 //global SIZE 3
 
 //display
-//repeat SIZE
+//repeat globals.SIZE
    //display
    //ret (+ x 1)
 //endrepeat
