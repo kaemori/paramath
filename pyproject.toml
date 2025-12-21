@@ -3,12 +3,27 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "paramath"
-version = "0.1.0"
+name = "paramath-lang"
+version = "2.2.4"
 description = "A differentiable programming language for continuous computation"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
+authors = [
+    { name = "Kaemori Yozzan" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Intended Audience :: Science/Research",
+]
+
+[project.urls]
+Homepage = "https://github.com/kaemori/paramath"
+Repository = "https://github.com/kaemori/paramath"
+Issues = "https://github.com/kaemori/paramath/issues"
+Documentation = "https://github.com/kaemori/paramath/blob/main/docs/paramath_docs.md"
 
 [project.scripts]
 paramath = "paramath.cli:main"

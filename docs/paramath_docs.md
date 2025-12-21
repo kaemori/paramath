@@ -1,4 +1,4 @@
-# Paramath Language Specification v2.2.2
+# Paramath Language Specification v2.2.4
 
 _A differentiable programming language for continuous computation_
 
@@ -1066,7 +1066,7 @@ identifier     ::= (alpha | "_") (alpha | digit | "_")*
 
 Paramath is an evolving language. Contributions and feedback are welcome!
 
-**Version**: 2.2.2
+**Version**: 2.2.4
 **License**: MIT  
 **GitHub**: https://github.com/kaemori/paramath
 

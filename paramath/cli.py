@@ -11,7 +11,7 @@ import builtins
 import math
 
 
-PROGRAM_VERSION = "2.2.2"
+PROGRAM_VERSION = "2.2.4"
 
 
 BUILTIN_FUNCS = ["abs", "sin", "cos", "tan", "arcsin", "arccos", "arctan"]

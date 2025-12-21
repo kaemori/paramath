@@ -18,20 +18,14 @@ All this, powered by Python!
 
 Full documentation is available [here](docs/paramath_docs.md)!
 
-## Online IDE
-
-note to self to finish this PLEASE
-
 ## Installation
 
 ### Method 1 (PyPI):
 
-> note to self pls upload to pypi
-
 To install the latest release, just install it fron PyPI using:
 
 ```
-pip install paramath
+pip install paramath-lang
 ```
 
 Afterwards, run this to ensure Paramath is correctly installed:
@@ -43,7 +37,7 @@ paramath --version
 To update, just run:
 
 ```
-pip install --upgrade paramath
+pip install --upgrade paramath-lang
 ```
 
 ### Method 2 (Direct Git Clone):
