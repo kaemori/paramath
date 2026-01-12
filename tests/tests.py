@@ -5,15 +5,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from paramath import cli
-from paramath.cli import ParserError
+import paramath
+from paramath import ParserError
 
 
 def test_compile_all_pm_files():
-
-    cli.VERBOSE = False
-    cli.DEBUG = False
-    cli.LOGFILE = None
+    paramath.ARGS = {
+        "verbose": False,
+        "debug": False,
+        "logfile": None,
+    }
     test_dir = Path(__file__).parent.parent / "paramath_tests"
 
     if not test_dir.exists():
@@ -41,7 +42,7 @@ def test_compile_all_pm_files():
             with open(pm_file, "r") as f:
                 code = f.read().strip().replace(";", "\n").split("\n")
 
-            results = cli.parse_program(code, safe_eval=False)
+            results = paramath.parse_program(code, safe_eval=False)
 
             print(f"✓ ({len(results)} expressions)")
             passed_files.append(relative_path)
