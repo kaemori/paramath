@@ -62,7 +62,7 @@ python -m pip install .
 The compiler can be accessed with the following command:
 
 ```
-paramath [-h] [-v] [-o FILE] [-D] [-V] [-O] [-S] [-L FILE] [filepath]
+paramath [-h] [-v] [-O FILE] [-P] [-D] [-V] [-S] [-L FILE] [filepath]
 
 positional arguments:
   filepath            Input paramath file
@@ -70,10 +70,10 @@ positional arguments:
 options:
   -h, --help          show this help message and exit
   -v, --version       prints the Paramath version number and exits
-  -o, --output FILE   output file (default: math.txt)
+  -O, --output FILE   output to a file INSTEAD of printing
+  -P, --print         print success messages (always on when --output is set)
   -D, --debug         enable debug output
   -V, --verbose       enable verbose output
-  -O, --print-output  print out the compiled output
   -S, --safe-eval     prints and blocks python code from evaluating and exits, used for safely running unknown scripts
   -L, --logfile FILE  write logs to FILE
 ```

@@ -14,8 +14,6 @@ ARGS = {
     "verbose": False,
     "debug": False,
     "logfile": None,
-    "print_output": False,
-    "safe_eval": False
 }
 
 

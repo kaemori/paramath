@@ -9,9 +9,9 @@ def main():
         epilog="""
 examples:
   paramath testfile.pm
-  paramath testfile.pm -D -V
-  paramath testfile.pm -L output.log
-  paramath testfile.pm -DVL debug.log
+  paramath testfile.pm -d -V
+  paramath testfile.pm -l output.log
+  paramath testfile.pm -dVl debug.log
         """,
     )
 
@@ -28,23 +28,23 @@ examples:
         help="prints the Paramath version number and exits",
     )
     parser.add_argument(
-        "-o",
+        "-O",
         "--output",
-        default="math.txt",
+        required=False,
         metavar="FILE",
-        help="output file (default: math.txt)",
+        help="output to a file INSTEAD of printing",
+    )
+    parser.add_argument(
+        "-P",
+        "--print",
+        action="store_true",
+        help="print success messages (always on when --output is set)",
     )
     parser.add_argument(
         "-D", "--debug", action="store_true", help="enable debug output"
     )
     parser.add_argument(
         "-V", "--verbose", action="store_true", help="enable verbose output"
-    )
-    parser.add_argument(
-        "-O",
-        "--print-output",
-        action="store_true",
-        help="print out the compiled output",
     )
     parser.add_argument(
         "-S",
@@ -56,9 +56,9 @@ examples:
         "-L", "--logfile", required=False, metavar="FILE", help="write logs to FILE"
     )
     args = parser.parse_args()
-    for name, a in args.__dict__.items():
-        if name in ARGS:
-            ARGS[name] = a
+    for name in ARGS:
+        if hasattr(args, name):
+            ARGS[name] = getattr(args, name)
 
     if ARGS["logfile"]:
         with open(ARGS["logfile"], "w") as f:
@@ -67,38 +67,42 @@ examples:
     try:
         if args.filepath is None:
             raise ParserError("No path to file provided, quitting")
-        print(f"reading {args.filepath}")
-        if ARGS["safe_eval"]:
-            print("[safe evaluation enabled]")
-        if ARGS["debug"]:
-            print("[debug mode enabled]")
-        if ARGS["verbose"]:
-            print("[verbose mode enabled]")
-        if ARGS["logfile"]:
-            print(f"[logging to: {ARGS['logfile']}]")
-        if ARGS["print_output"]:
-            print()
+        if args.print or args.output:
+            print(f"reading {args.filepath}")
+            if args.safe_eval:
+                print("[safe evaluation enabled]")
+            if ARGS["debug"]:
+                print("[debug mode enabled]")
+            if ARGS["verbose"]:
+                print("[verbose mode enabled]")
+            if ARGS["logfile"]:
+                print(f"[logging to: {ARGS['logfile']}]")
 
         with open(args.filepath) as f:
             code = f.read().strip().replace(";", "\n").split("\n")
 
-        results = parse_program(code, ARGS["safe_eval"])
+        results = parse_program(code, args.safe_eval)
 
-        with open(args.output, "w") as f:
-            for result, output in results:
-                result = (
-                    result.replace("**", "^").replace("*", "").replace("ans", "ANS")
-                )
-                if ARGS["print_output"]:
-                    print(f"to {output}:")
-                    print(result)
-                f.write(f"to {output}:\n{result}\n")
+        if args.print or args.output:
+            print("=== compilation successful! ===")
+            print(f"generated {len(results)} expressions")
 
-        if ARGS["print_output"]:
-            print("")
-        print("=== compilation successful! ===")
-        print(f"generated {len(results)} expressions")
-        print(f"written to: {args.output}")
+        out = ""
+        for result, output in results:
+            result = (
+                result.replace("**", "^").replace("*", "").replace("ans", "ANS")
+            )
+            out += f"to {output}:\n{result}\n"
+
+        if args.output:
+            with open(args.output, "w+") as f:
+                f.write(out)
+            if args.print:
+                print(f"written to: {args.output}")
+        else:
+            if args.print:
+                print()
+            print(out, end="", flush=True)
 
     except FileNotFoundError:
         print(f"error: file '{args.filepath}' not found")
