@@ -764,32 +764,49 @@ paramath [options] filepath
 | --------- | ---------------- | ----------------------------------------------------- | ---------------------------------- |
 | `-h`      | `--help`         | Show help message                                     | `paramath --help`                  |
 | `-v`      | `--version`      | Print version and exit                                | `paramath --version`               |
-| `-o FILE` | `--output FILE`  | Output file (default: `math.txt`)                     | `paramath input.pm -o results.txt` |
+| `-O FILE` | `--output FILE`  | output to a file instead of printing                  | `paramath input.pm -O results.txt` |
+| `-P`      | `--print`        | Print success messages                                | `paramath input.pm -P`             |
 | `-D`      | `--debug`        | Enable debug output                                   | `paramath input.pm -D`             |
 | `-V`      | `--verbose`      | Enable verbose output                                 | `paramath input.pm -V`             |
-| `-O`      | `--print-output` | Print compiled output to console                      | `paramath input.pm -O`             |
 | `-S`      | `--safe-eval`    | Block Python code evaluation and print what would run | `paramath unknown.pm -S`           |
 | `-L FILE` | `--logfile FILE` | Write logs to FILE                                    | `paramath input.pm -L debug.log`   |
 
 ### Flag Details
 
-#### `-O` / `--print-output`
+#### `-O` / `--output FILE`
 
-Prints the compiled mathematical expressions to stdout:
+Prints the compiled mathematical expressions to a file instead of stdout:
 
 ```bash
-$ paramath myfile.pm -O
+$ paramath myfile.pm -O math.txt
 reading myfile.pm
-
-to ('display', None):
-(sin(x))+1
-to ('display', None):
-(cos(x))+2
-
 === compilation successful! ===
 generated 2 expressions
 written to: math.txt
 ```
+
+#### `-P` / `--print`
+
+Prints the flags before running and a success message when compilation is successful.
+
+Always on when `--output` is set (as seen above).
+
+```bash
+$ paramath myfile.pm -PS
+reading myfile.pm
+=== compilation successful! ===
+generated 2 expressions
+
+# ... output as normal
+```
+
+#### `-D` / `--debug`
+
+Enables detailed debug output showing parsing steps, optimization decisions, etc. Useful for understanding how the compiler works.
+
+#### `-V` / `--verbose`
+
+Enables verbose output showing high-level compilation progress.
 
 #### `-S` / `--safe-eval`
 
@@ -807,14 +824,6 @@ Use this when:
 -   Running untrusted `.pm` files
 -   Reviewing user-submitted paramath code
 -   Auditing what Python expressions will be evaluated
-
-#### `-D` / `--debug`
-
-Enables detailed debug output showing parsing steps, optimization decisions, etc. Useful for understanding how the compiler works.
-
-#### `-V` / `--verbose`
-
-Enables verbose output showing high-level compilation progress.
 
 #### `-L` / `--logfile FILE`
 
