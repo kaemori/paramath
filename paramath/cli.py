@@ -11,7 +11,7 @@ import builtins
 import math
 
 
-PROGRAM_VERSION = "2.2.4"
+PROGRAM_VERSION = "2.2.5"
 
 
 BUILTIN_FUNCS = ["abs", "sin", "cos", "tan", "arcsin", "arccos", "arctan"]
@@ -911,7 +911,7 @@ def apply_structural_simplifications(op: str, operands: List[Any]) -> Optional[A
             return 1
         elif len(new_factors) == 1:
             return new_factors[0]
-        elif len(new_factors) != len(flat_operands):
+        elif new_factors != flat_operands:
 
             debug_print(
                 f"simplified repeated multiplication: {len(flat_operands)} -> {len(new_factors)} factors"
@@ -1067,6 +1067,19 @@ def simplify_ast(
                 )
                 for node in ast[1:]
             ]
+
+            if op_lower == "*" and len(simplified_operands) >= 2:
+                numeric_factors = [
+                    operand
+                    for operand in simplified_operands
+                    if isinstance(operand, (int, float))
+                ]
+                other_factors = [
+                    operand
+                    for operand in simplified_operands
+                    if not isinstance(operand, (int, float))
+                ]
+                simplified_operands = numeric_factors + other_factors
 
             if do_simplify:
                 identity_result = apply_identity_simplifications(
@@ -1259,36 +1272,46 @@ def generate_expression(ast: Any, line_num: int) -> str:
         if len(operands) != 2:
             raise ParserError(f"operator '{op}' requires exactly 2 operands", line_num)
 
-        left = generate_expression(operands[0], line_num)
-        right = generate_expression(operands[1], line_num)
+        left_node = operands[0]
+        right_node = operands[1]
+
+        if op == "*":
+            left_is_num = isinstance(left_node, (int, float))
+            right_is_num = isinstance(right_node, (int, float))
+
+            if right_is_num and not left_is_num:
+                left_node, right_node = right_node, left_node
+
+        left = generate_expression(left_node, line_num)
+        right = generate_expression(right_node, line_num)
 
         if op == "**":
-            if (isinstance(operands[0], (int, float)) and operands[0] < 0) or (
-                isinstance(operands[0], str) and left.startswith("-")
+            if (isinstance(left_node, (int, float)) and left_node < 0) or (
+                isinstance(left_node, str) and left.startswith("-")
             ):
                 left = f"({left})"
 
         needs_right_parens = (
-            isinstance(operands[1], list)
-            and len(operands[1]) >= 2
-            and operands[1][0] in OP_PRECEDENCE
-            and OP_PRECEDENCE[operands[1][0]] < OP_PRECEDENCE[op]
+            isinstance(right_node, list)
+            and len(right_node) >= 2
+            and right_node[0] in OP_PRECEDENCE
+            and OP_PRECEDENCE[right_node[0]] < OP_PRECEDENCE[op]
         )
         needs_left_parens = (
-            isinstance(operands[0], list)
-            and len(operands[0]) >= 2
-            and operands[0][0] in OP_PRECEDENCE
+            isinstance(left_node, list)
+            and len(left_node) >= 2
+            and left_node[0] in OP_PRECEDENCE
             and (
-                OP_PRECEDENCE[operands[0][0]] < OP_PRECEDENCE[op]
+                OP_PRECEDENCE[left_node[0]] < OP_PRECEDENCE[op]
                 or (
                     op in ["-", "/", "**"]
-                    and OP_PRECEDENCE[operands[0][0]] <= OP_PRECEDENCE[op]
+                    and OP_PRECEDENCE[left_node[0]] <= OP_PRECEDENCE[op]
                 )
             )
         )
 
-        if op == "/" and isinstance(operands[1], list) and len(operands[1]) >= 2:
-            if operands[1][0] in ["*", "/"]:
+        if op == "/" and isinstance(right_node, list) and len(right_node) >= 2:
+            if right_node[0] in ["*", "/"]:
                 needs_right_parens = True
 
         if needs_left_parens:
@@ -2187,6 +2210,12 @@ examples:
         help="print out the compiled output",
     )
     parser.add_argument(
+        "-m",
+        "--math-output",
+        action="store_true",
+        help="format output for calculators (use ^, implicit multiplication, ANS)",
+    )
+    parser.add_argument(
         "-S",
         "--safe-eval",
         action="store_true",
@@ -2230,9 +2259,10 @@ examples:
 
         with open(args.output, "w") as f:
             for result, output in results:
-                result = (
-                    result.replace("**", "^").replace("*", "").replace("ans", "ANS")
-                )
+                if args.math_output:
+                    result = (
+                        result.replace("**", "^").replace("*", "").replace("ans", "ANS")
+                    )
                 if PRINT_OUTPUT:
                     print(f"to {output}:")
                     print(result)

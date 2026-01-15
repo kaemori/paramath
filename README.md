@@ -74,6 +74,7 @@ options:
   -D, --debug         enable debug output
   -V, --verbose       enable verbose output
   -O, --print-output  print out the compiled output
+  -m, --math-output   format output for calculators (use ^, implicit multiplication, ANS)
   -S, --safe-eval     prints and blocks python code from evaluating and exits, used for safely running unknown scripts
   -L, --logfile FILE  write logs to FILE
 ```

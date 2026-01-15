@@ -1,4 +1,4 @@
-# Paramath Language Specification v2.2.4
+# Paramath Language Specification v2.2.5
 
 _A differentiable programming language for continuous computation_
 
@@ -768,6 +768,7 @@ paramath [options] filepath
 | `-D`      | `--debug`        | Enable debug output                                   | `paramath input.pm -D`             |
 | `-V`      | `--verbose`      | Enable verbose output                                 | `paramath input.pm -V`             |
 | `-O`      | `--print-output` | Print compiled output to console                      | `paramath input.pm -O`             |
+| `-m`      | `--math-output`  | Format output for calculators                         | `paramath input.pm -m`             |
 | `-S`      | `--safe-eval`    | Block Python code evaluation and print what would run | `paramath unknown.pm -S`           |
 | `-L FILE` | `--logfile FILE` | Write logs to FILE                                    | `paramath input.pm -L debug.log`   |
 
@@ -1066,7 +1067,7 @@ identifier     ::= (alpha | "_") (alpha | digit | "_")*
 
 Paramath is an evolving language. Contributions and feedback are welcome!
 
-**Version**: 2.2.4
+**Version**: 2.2.5
 **License**: MIT  
 **GitHub**: https://github.com/kaemori/paramath
 
