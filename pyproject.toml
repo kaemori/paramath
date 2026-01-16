@@ -19,6 +19,9 @@ classifiers = [
     "Intended Audience :: Science/Research",
 ]
 
+[project.optional-dependencies]
+sympy = ["sympy>=1.10", "tqdm>=4.64"]
+
 [project.urls]
 Homepage = "https://github.com/kaemori/paramath"
 Repository = "https://github.com/kaemori/paramath"

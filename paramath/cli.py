@@ -9,10 +9,17 @@ import sys
 import re
 import builtins
 import math
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 PROGRAM_VERSION = "2.2.5"
 
+DEBUG = False
+VERBOSE = False
+LOGFILE = None
+PRINT_OUTPUT = False
+SAFE_EVAL = False
 
 BUILTIN_FUNCS = ["abs", "sin", "cos", "tan", "arcsin", "arccos", "arctan"]
 BASIC_OPS = {"+", "-", "*", "/", "**"} | set(BUILTIN_FUNCS)
@@ -374,7 +381,7 @@ def compile_value(
     possible_result = None
     try:
         eval_result = eval(expr_str, eval_namespace)
-        result = round(num(eval_result), config.precision)
+        result = num(eval_result)
         debug_print(f"eval'd to: {result}")
         if safe_eval:
             debug_print("(SAFE EVAL ENABLED)")
@@ -756,7 +763,7 @@ def parse_tokens(tokens: List[str], line_num: int) -> Any:
         if not tokens:
             raise ParserError("missing closing parenthesis ')'", line_num)
         tokens.pop(0)
-        debug_print(f"parsed expression with {len(expr)} elements")
+        debug_print(f"parsed expression with {len(expr)} elements, {expr}")
         return expr
     elif token == ")":
         raise ParserError("unexpected closing parenthesis ')'", line_num)
@@ -771,6 +778,40 @@ def parse_tokens(tokens: List[str], line_num: int) -> Any:
 
 
 def apply_identity_simplifications(op: str, operands: List[Any]) -> Optional[Any]:
+    def pull_negative(node: Any) -> Tuple[bool, Any]:
+        if isinstance(node, (int, float)):
+            return (node < 0, -node if node < 0 else node)
+
+        if (
+            isinstance(node, list)
+            and len(node) == 3
+            and isinstance(node[0], str)
+            and node[0] == "-"
+            and node[1] == 0
+        ):
+            return (True, node[2])
+
+        if (
+            isinstance(node, list)
+            and len(node) == 3
+            and isinstance(node[0], str)
+            and node[0] == "*"
+        ):
+            left_neg, left_pos = pull_negative(node[1])
+            right_neg, right_pos = pull_negative(node[2])
+            neg = left_neg ^ right_neg
+
+            if left_pos == 1:
+                product = right_pos
+            elif right_pos == 1:
+                product = left_pos
+            else:
+                product = ["*", left_pos, right_pos]
+
+            return (neg, product)
+
+        return (False, node)
+
     if op == "*":
         if 0 in operands:
             debug_print("simplified multiplication by zero")
@@ -790,6 +831,11 @@ def apply_identity_simplifications(op: str, operands: List[Any]) -> Optional[Any
                 return operands[1]
             if operands[1] == 0:
                 return operands[0]
+
+            rhs_neg, rhs_pos = pull_negative(operands[1])
+            if rhs_neg:
+                debug_print("simplified a + (-b) = a - b")
+                return ["-", operands[0], rhs_pos]
 
             if operands[0] == operands[1]:
                 debug_print("simplified a + a = 2*a")
@@ -1200,6 +1246,39 @@ def simplify_with_sympy(expr_str: str, line_num: int) -> str:
         return expr_str
 
 
+def _sympy_simplify_worker(task: Tuple[int, str, int]) -> Tuple[int, str]:
+    """Process-safe SymPy simplifier.
+
+    task: (result_index, expression_string, line_num)
+    returns: (result_index, simplified_expression_string)
+    """
+
+    index, expr_str, line_num = task
+    try:
+        import sympy as sp
+
+        expr_str = (
+            expr_str.replace("arcsin", "asin")
+            .replace("arccos", "acos")
+            .replace("arctan", "atan")
+        )
+
+        sympy_expr = sp.sympify(expr_str)
+        simplified = sp.simplify(sympy_expr)
+        result = str(simplified)
+
+        result = (
+            result.replace("asin", "arcsin")
+            .replace("acos", "arccos")
+            .replace("atan", "arctan")
+        )
+
+        result = result.replace(" ", "").replace("Abs", "abs").replace(".0e", "e")
+        return index, result
+    except Exception:
+        return index, expr_str
+
+
 @cached("length")
 def expr_length(ast: Any, line_num: int) -> int:
     if isinstance(ast, (int, float)):
@@ -1359,7 +1438,7 @@ def try_simplify(ast, inst):
         result_val = round(eval(expr), inst.precision)
         if result_val.is_integer():
             result_val = int(result_val)
-        debug_print(f"simplified literal expression to {result_val}")
+        debug_print(f'simplified literal expression "{expr}" to {result_val}')
         return (result_val, False)
     except Exception as e:
         debug_print(f"failed to simplify literal: {e}")
@@ -2070,6 +2149,7 @@ def compile_instructions(
     instructions: List[Instruction], config: ProgramConfig
 ) -> List[Tuple[str, Tuple[str, Optional[str]]]]:
     results = []
+    sympy_tasks: List[Tuple[int, str, int]] = []
 
     for inst in instructions:
         try:
@@ -2094,10 +2174,12 @@ def compile_instructions(
             )
 
             for index, (expr_ast, var_name) in enumerate(subexpressions):
+                debug_print(f"pre-simplified ast: {expr_ast}")
                 if inst.simplify:
                     expr_ast = try_simplify(expr_ast, inst)[0]
 
                 expr = generate_expression(expr_ast, inst.line_start)
+                verbose_print(f"generated expression: {expr}")
 
                 if expr.startswith("(") and expr.endswith(")"):
                     paren_depth = 0
@@ -2125,11 +2207,7 @@ def compile_instructions(
                 expr = expr.replace("ε", epsilon_str)
 
                 if inst.sympy:
-                    expr = (
-                        simplify_with_sympy(expr, inst.line_start)
-                        .replace("Abs", "abs")
-                        .replace(".0e", "e")
-                    )
+                    sympy_tasks.append((len(results), expr, inst.line_start))
 
                 if var_name == "ans":
                     output_mode = ("store", "ans", "dupe")
@@ -2142,6 +2220,33 @@ def compile_instructions(
             if e.line_num is None:
                 raise ParserError(str(e), inst.line_start)
             raise
+
+    if sympy_tasks:
+        try:
+            from tqdm import tqdm
+
+            progress_iter = tqdm(total=len(sympy_tasks), desc="sympy", unit="expr")
+        except Exception:
+            tqdm = None
+            progress_iter = None
+
+        max_workers = max(1, min(len(sympy_tasks), os.cpu_count() or 1))
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_sympy_simplify_worker, task) for task in sympy_tasks
+            ]
+            if progress_iter is not None:
+                for fut in as_completed(futures):
+                    idx, simplified_expr = fut.result()
+                    prev_expr, prev_output = results[idx]
+                    results[idx] = (simplified_expr, prev_output)
+                    progress_iter.update(1)
+                progress_iter.close()
+            else:
+                for fut in as_completed(futures):
+                    idx, simplified_expr = fut.result()
+                    prev_expr, prev_output = results[idx]
+                    results[idx] = (simplified_expr, prev_output)
 
     return results
 
@@ -2261,7 +2366,11 @@ examples:
             for result, output in results:
                 if args.math_output:
                     result = (
-                        result.replace("**", "^").replace("*", "").replace("ans", "ANS")
+                        result.replace("**", "^")
+                        .replace("*", "")
+                        .replace("ans", "ANS")
+                        .replace("pi", "π")
+                        .replace("e", "ℯ")
                     )
                 if PRINT_OUTPUT:
                     print(f"to {output}:")
