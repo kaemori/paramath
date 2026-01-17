@@ -13,7 +13,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-PROGRAM_VERSION = "2.2.5"
+PROGRAM_VERSION = "2.2.7"
 
 DEBUG = False
 VERBOSE = False
@@ -2354,8 +2354,6 @@ examples:
             print("[verbose mode enabled]")
         if LOGFILE:
             print(f"[logging to: {LOGFILE}]")
-        if PRINT_OUTPUT:
-            print()
 
         with open(args.filepath) as f:
             code = f.read().strip().replace(";", "\n").split("\n")
@@ -2372,13 +2370,9 @@ examples:
                         .replace("pi", "π")
                         .replace("e", "ℯ")
                     )
-                if PRINT_OUTPUT:
-                    print(f"to {output}:")
-                    print(result)
+                print(f"to {output}:\n{result}")
                 f.write(f"to {output}:\n{result}\n")
 
-        if PRINT_OUTPUT:
-            print("")
         print(f"=== compilation successful! ===")
         print(f"generated {len(results)} expressions")
         print(f"written to: {args.output}")
