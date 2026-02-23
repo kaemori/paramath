@@ -1,4 +1,5 @@
-# The Paramath Programming Language
+# The Paramath Programming Language, version 2
+The newer **Paramath Version 3** can be accessed [here](github.com/kaemori/paramath3)
 
 Paramath is a Domain-Specific Language (DSL) that transforms procedural math code into mathematical expressions. Paramath compiles into math expressions with operations that are commonly found on standard scientific calculators, allowing evaluation of logical code on mathematical hardware.
 
